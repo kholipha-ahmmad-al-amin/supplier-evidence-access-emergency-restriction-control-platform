@@ -1,0 +1,16 @@
+import express from 'express';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { EmergencyRestrictionService } from './domain.mjs';
+import { AtomicJsonStore } from './store.mjs';
+const root = fileURLToPath(new URL('.', import.meta.url)); const service = new EmergencyRestrictionService(new AtomicJsonStore(join(root, 'data', 'restrictions.json'))); const app = express(); app.use(express.json({ limit: '64kb' }));
+const actor = (request) => ({ id: request.get('x-actor-id'), role: request.get('x-actor-role') });
+const transition = (method) => (request, response) => { try { response.json({ restriction: method(request.params.id, request.body, actor(request)) }); } catch (error) { response.status(/not found/.test(error.message) ? 404 : 422).json({ error: error.message }); } };
+app.get('/health', (_request, response) => response.json({ status: 'ok', service: 'supplier-evidence-access-emergency-restriction-control-platform' }));
+app.get('/v1/restrictions', (_request, response) => response.json({ restrictions: service.list() }));
+app.post('/v1/restrictions', (request, response) => { try { response.status(201).json({ restriction: service.declare(request.body, actor(request)) }); } catch (error) { response.status(422).json({ error: error.message }); } });
+app.post('/v1/restrictions/:id/assess', transition(service.assess.bind(service)));
+app.post('/v1/restrictions/:id/restrict', transition(service.restrict.bind(service)));
+app.post('/v1/restrictions/:id/notify', transition(service.notify.bind(service)));
+app.post('/v1/restrictions/:id/resolve', transition(service.resolve.bind(service)));
+app.listen(Number(process.env.PORT || 65300), '0.0.0.0', () => console.log('Supplier evidence emergency restriction controls listening on 65300'));
